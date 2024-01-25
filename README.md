@@ -127,8 +127,8 @@
 
 ### Leader Board
 
-- _Insert Leader Board Capture_
-- _Write rank and score_
+- ![LeaderBoard](https://github.com/UpstageAILab/upstage-ml-regression-05/assets/107274920/11c7af8c-b33f-4e6a-a454-c455c23576a8)
+- Lank 8, 96538.2074
 
 ### Presentation
 
@@ -142,4 +142,5 @@
 
 ### Reference
 
-- _Insert related reference_
+- Dacon 아파트 실거래가 예측 프로젝트 : https://dacon.io/competitions/official/236047/codeshare/7709
+- Kaggle House Prediction Simple Solution : https://www.kaggle.com/code/anandhuh/house-price-prediction-simple-solution-top-3?scriptVersionId=74765540
