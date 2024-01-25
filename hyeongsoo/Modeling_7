@@ -1,0 +1,1643 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# 최소한의 변수로 모델 돌려보기 (feature importance 높은 변수로만)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 38,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import matplotlib.pyplot as plt\n",
+    "import seaborn as sns\n",
+    "import pandas as pd\n",
+    "import numpy as np\n",
+    "import warnings;warnings.filterwarnings('ignore')\n",
+    "import matplotlib.font_manager as fm\n",
+    "fe = fm.FontEntry(\n",
+    "    fname=r'/usr/share/fonts/truetype/nanum/NanumGothic.ttf', # ttf 파일이 저장되어 있는 경로\n",
+    "    name='NanumBarunGothic')                        # 이 폰트의 원하는 이름 설정\n",
+    "fm.fontManager.ttflist.insert(0, fe)              # Matplotlib에 폰트 추가\n",
+    "plt.rcParams.update({'font.size': 10, 'font.family': 'NanumBarunGothic'}) # 폰트 설정\n",
+    "plt.rc('font', family='NanumBarunGothic')\n",
+    "\n",
+    "from tqdm import tqdm\n",
+    "import pickle\n",
+    "import warnings;warnings.filterwarnings('ignore')\n",
+    "\n",
+    "import lightgbm as lgb\n",
+    "import xgboost as xgb\n",
+    "from sklearn.tree import DecisionTreeRegressor\n",
+    "from sklearn.ensemble import RandomForestRegressor\n",
+    "from sklearn.model_selection import TimeSeriesSplit\n",
+    "from sklearn.metrics import mean_squared_error\n",
+    "from sklearn.preprocessing import  LabelEncoder\n",
+    "from sklearn.ensemble import VotingRegressor\n",
+    "import optuna"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 39,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "train_path = './train.csv'\n",
+    "test_path  = './test.csv'\n",
+    "train = pd.read_csv(train_path)\n",
+    "test = pd.read_csv(test_path)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 40,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "train['is_test'] = 0\n",
+    "test['is_test'] = 1\n",
+    "concat = pd.concat([train, test])"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# 인구밀도 추가"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 41,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "population_density_path  = './인구밀도.csv'\n",
+    "population_density = pd.read_csv(population_density_path)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 42,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/html": [
+       "<div>\n",
+       "<style scoped>\n",
+       "    .dataframe tbody tr th:only-of-type {\n",
+       "        vertical-align: middle;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe tbody tr th {\n",
+       "        vertical-align: top;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe thead th {\n",
+       "        text-align: right;\n",
+       "    }\n",
+       "</style>\n",
+       "<table border=\"1\" class=\"dataframe\">\n",
+       "  <thead>\n",
+       "    <tr style=\"text-align: right;\">\n",
+       "      <th></th>\n",
+       "      <th>동별(1)</th>\n",
+       "      <th>동별(2)</th>\n",
+       "      <th>동별(3)</th>\n",
+       "      <th>인구 (명)</th>\n",
+       "      <th>면적 (㎢)</th>\n",
+       "      <th>인구밀도 (명/㎢)</th>\n",
+       "    </tr>\n",
+       "  </thead>\n",
+       "  <tbody>\n",
+       "    <tr>\n",
+       "      <th>1</th>\n",
+       "      <td>합계</td>\n",
+       "      <td>소계</td>\n",
+       "      <td>소계</td>\n",
+       "      <td>9667669</td>\n",
+       "      <td>605.21</td>\n",
+       "      <td>15974</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>2</th>\n",
+       "      <td>합계</td>\n",
+       "      <td>종로구</td>\n",
+       "      <td>소계</td>\n",
+       "      <td>152211</td>\n",
+       "      <td>23.91</td>\n",
+       "      <td>6365</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>3</th>\n",
+       "      <td>합계</td>\n",
+       "      <td>종로구</td>\n",
+       "      <td>사직동</td>\n",
+       "      <td>9355</td>\n",
+       "      <td>1.23</td>\n",
+       "      <td>7606</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>4</th>\n",
+       "      <td>합계</td>\n",
+       "      <td>종로구</td>\n",
+       "      <td>삼청동</td>\n",
+       "      <td>2642</td>\n",
+       "      <td>1.49</td>\n",
+       "      <td>1773</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>5</th>\n",
+       "      <td>합계</td>\n",
+       "      <td>종로구</td>\n",
+       "      <td>부암동</td>\n",
+       "      <td>9536</td>\n",
+       "      <td>2.27</td>\n",
+       "      <td>4201</td>\n",
+       "    </tr>\n",
+       "  </tbody>\n",
+       "</table>\n",
+       "</div>"
+      ],
+      "text/plain": [
+       "0 동별(1) 동별(2) 동별(3)   인구 (명)  면적 (㎢) 인구밀도 (명/㎢)\n",
+       "1    합계    소계    소계  9667669  605.21      15974\n",
+       "2    합계   종로구    소계   152211   23.91       6365\n",
+       "3    합계   종로구   사직동     9355    1.23       7606\n",
+       "4    합계   종로구   삼청동     2642    1.49       1773\n",
+       "5    합계   종로구   부암동     9536    2.27       4201"
+      ]
+     },
+     "execution_count": 42,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "# 맨 위 row를 변수 이름으로 설정\n",
+    "population_density.columns = population_density.iloc[0]\n",
+    "population_density = population_density[1:]\n",
+    "population_density.head()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 43,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# concat의 '시군구' 변수에서 동을 분리하여 따로 변수 만들기\n",
+    "concat['동'] = concat['시군구'].map(lambda x : x.split()[2])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 44,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# 인구밀도 데이터 변수의 타입 변환\n",
+    "population_density_new = population_density[['동별(3)', '인구 (명)', '면적 (㎢)', '인구밀도 (명/㎢)']]\n",
+    "population_density_new['인구 (명)'] = population_density_new['인구 (명)'].astype(float)\n",
+    "population_density_new['면적 (㎢)'] = population_density_new['면적 (㎢)'].astype(float)\n",
+    "population_density_new['인구밀도 (명/㎢)'] = population_density_new['인구밀도 (명/㎢)'].astype(float)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 45,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# concat에서 동을 (유사)행정동으로 반환하는 함수\n",
+    "# '동'이 여러 행정동에 걸쳐있는 경우 임으로 걸쳐있는 행정동 중 하나로 선택하였음\n",
+    "def to_hangjungdong(dong):\n",
+    "    if dong in ['금호동1가']: \n",
+    "        return '금호1가동'\n",
+    "    elif dong in ['봉천동']: # 중앙동은 5개의 동에 걸쳐있음\n",
+    "        return '중앙동'\n",
+    "    elif dong in ['마곡동']: # 마곡동은 가양1동, 방화1동, 발산1동에 걸쳐있음\n",
+    "        return '가양동'\n",
+    "    elif dong in ['내발산동']: # 내발산동은 '발산1동'과 '우장산동'에 걸쳐있음\n",
+    "        return '발산1동'\n",
+    "    elif dong in ['자곡동', '율현동']:\n",
+    "        return '세곡동'\n",
+    "    elif dong in ['금호동2가', '금호동3가']:\n",
+    "        return '금호2.3가동'\n",
+    "    elif dong in ['금호동4가']:\n",
+    "        return '금호4가동'\n",
+    "    elif dong in ['남대문로5가']:\n",
+    "        return '회현동'\n",
+    "    elif dong in ['남산동2가']:\n",
+    "        return '명동'\n",
+    "    elif dong in ['당산동1가', '당산동2가', '당산동3가']:\n",
+    "        return '당산1동'\n",
+    "    elif dong in ['당산동4가', '당산동5가', '당산동6가']:\n",
+    "        return '당산2동'\n",
+    "    elif dong in ['동선동1가', '동선동3가', '동선동4가', '동선동5가', '동소문동6가', '동소문동7가']:\n",
+    "        return '동선동'\n",
+    "    elif dong in ['동소문동5가', '삼선동2가', '삼선동3가', '삼선동4가', '삼선동5가']:\n",
+    "        return '삼선동'\n",
+    "    elif dong in ['만리동2가', '만리동1가']:\n",
+    "        return '중림동'\n",
+    "    elif dong in ['명륜1가', '명륜2가', '명륜3가']:\n",
+    "        return '혜화동'\n",
+    "    elif dong in ['문래동2가', '문래동3가', '문래동4가', '문래동5가', '문래동6가']:\n",
+    "        return '문래동'\n",
+    "    elif dong in ['보문동2가', '보문동3가', '보문동4가', '보문동6가']:\n",
+    "        return '보문동'\n",
+    "    elif dong in ['성북동1가', '동소문동', '동소문동4가']:\n",
+    "        return '성북동'\n",
+    "    elif dong in ['신문로1가', '신문로2가', '내수동', '당주동', '필운동']:\n",
+    "        return '사직동'\n",
+    "    elif dong in ['안암동1가', '안암동3가', '안암동4가', '안암동5가']:\n",
+    "        return '안암동'\n",
+    "    elif dong in ['양평동1가', '양평동2가', '양평동3가']: \n",
+    "        return '양평1동'\n",
+    "    elif dong in ['양평동4가', '양평동5가', '양평동6가']: # '양평동3가'는 '양평1동'과 '양평2동'에 걸쳐있음 \n",
+    "        return '양평2동'\n",
+    "    elif dong in ['영등포동1가', '영등포동2가', '영등포동3가', '영등포동4가', '영등포동5가', '영등포동7가', '영등포동8가']:\n",
+    "        return '영등포동'\n",
+    "    elif dong in ['용산동2가']:\n",
+    "        return '용산2가동'\n",
+    "    elif dong in ['원효로1가', '원효로2가', '문배동', '신계동']: # 원효로1동, 2동의 인구밀도가 크게 차이나기 떄문에 두 개 분리\n",
+    "        return  '원효로1동'\n",
+    "    elif dong in ['원효로3가', '원효로4가', '산천동', '신창동', '청암동']:\n",
+    "        return '원효로2동'\n",
+    "    elif dong in ['을지로5가', '산림동', '입정동']:\n",
+    "        return '을지로동'\n",
+    "    elif dong in ['인현동2가', '오장동', '충무로4가', '충무로5가']: \n",
+    "        return '광희동'\n",
+    "    elif dong in ['장충동1가', '장충동2가']:\n",
+    "        return '장충동'\n",
+    "    elif dong in ['청파동1가', '청파동3가']:\n",
+    "        return '청파동'\n",
+    "    elif dong in ['충정로2가', '충정로3가', '합동', '미근동']:\n",
+    "        return '충현동'\n",
+    "    elif dong in ['필동1가', '필동3가', '묵정동', '예장동']:\n",
+    "        return '필동'\n",
+    "    elif dong in ['한강로1가', '한강로2가', '한강로3가', '용산동5가']:\n",
+    "        return '한강로동'\n",
+    "    elif dong in ['회현동1가', '회현동2가', '남창동']:\n",
+    "        return '회현동'\n",
+    "    elif dong in ['천왕동']:\n",
+    "        return '오류동'\n",
+    "    elif dong in ['온수동', '궁동']:\n",
+    "        return '수궁동'\n",
+    "    elif dong in ['용두동', '신설동']:\n",
+    "        return '용신동'\n",
+    "    elif dong in ['본동']:\n",
+    "        return '노량진동'\n",
+    "    elif dong in ['동작동']:\n",
+    "        return '사당동'\n",
+    "    elif dong in ['노고산동']:\n",
+    "        return '대흥동'\n",
+    "    elif dong in ['마포동']:\n",
+    "        return '도화동'\n",
+    "    elif dong in ['상수동']:\n",
+    "        return '서강동'\n",
+    "    elif dong in ['신공덕동']:\n",
+    "        return '공덕동'\n",
+    "    elif dong in ['동교동']:\n",
+    "        return '연남동'\n",
+    "    elif dong in ['중동']:\n",
+    "        return '성산동'\n",
+    "    elif dong in ['창전동', '하중동']:\n",
+    "        return '서강동'\n",
+    "    elif dong in ['냉천동', '영천동', '현저동']:\n",
+    "        return '천연동'\n",
+    "    elif dong in ['토정동']:\n",
+    "        return '용강동'\n",
+    "    elif dong in ['현석동', '구수동']:\n",
+    "        return '신수동'\n",
+    "    elif dong in ['대현동', '창천동']:\n",
+    "        return '신촌동'\n",
+    "    elif dong in ['우면동']:\n",
+    "        return '양재동'\n",
+    "    elif dong in ['도선동', '상왕십리동', '하왕십리동', '홍익동']:\n",
+    "        return '왕십리도선동'\n",
+    "    elif dong in ['상월곡동', '하월곡동']:\n",
+    "        return '월곡동'\n",
+    "    elif dong in ['신천동']:\n",
+    "        return '잠실동'\n",
+    "    elif dong in ['여의도동']:\n",
+    "        return '여의동'\n",
+    "    elif dong in ['갈월동', '동자동']:\n",
+    "        return '남영동'\n",
+    "    elif dong in ['도원동']:\n",
+    "        return '용문동'\n",
+    "    elif dong in ['동빙고동', '주성동']:\n",
+    "        return '서빙고동'\n",
+    "    elif dong in ['익선동', '견지동', '인의동', '수송동', '원남동', '낙원동']:\n",
+    "        return '종로1.2.3.4가동'\n",
+    "    elif dong in ['효제동', '충신동', '연지동']:\n",
+    "        return '종로5.6가동'\n",
+    "    elif dong in ['교북동', '행촌동', '홍파동', '평동']:\n",
+    "        return '교남동'\n",
+    "    elif dong in ['누상동', '옥인동', '청운동', '통인동', '신교동']:\n",
+    "        return '청운효자동'\n",
+    "    elif dong in ['동숭동', '연건동']:\n",
+    "        return '이화동'\n",
+    "    elif dong in ['신영동']:\n",
+    "        return '부암동'\n",
+    "    elif dong in ['순화동', '정동']:\n",
+    "        return '소공동'\n",
+    "    elif dong in ['흥인동']:\n",
+    "        return '신당동'\n",
+    "    elif dong in ['구기동']:\n",
+    "        return '평창동'\n",
+    "    else:\n",
+    "        return dong\n",
+    "    "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 46,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# concat의 '동'을 유사 행정동으로 변환\n",
+    "concat['행정동'] = concat['동'].apply(to_hangjungdong)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 47,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# 인구밀도 데이터의 몇 개의 행정동을 하나로 합쳐주기 위한 리스트\n",
+    "dong_merge_list = [['성수동1가', '성수1가1동','성수1가2동'],\n",
+    "                   ['성수동2가', '성수2가1동', '성수2가3동'],\n",
+    "                   ['논현동', '논현1동', '논현2동'],\n",
+    "                   ['대치동', '대치1동', '대치2동', '대치4동'],\n",
+    "                   ['도곡동', '도곡1동', '도곡2동'],\n",
+    "                   ['역삼동', '역삼1동', '역삼2동'],\n",
+    "                   ['일원동', '일원본동', '일원1동'],\n",
+    "                   ['고덕동', '고덕1동', '고덕2동'],\n",
+    "                   ['둔촌동', '둔촌1동', '둔촌2동'],\n",
+    "                   ['명일동', '명일1동', '명일2동'],\n",
+    "                   ['상일동', '상일1동', '상일2동'],\n",
+    "                   ['성내동', '성내1동', '성내2동', '성내3동'],\n",
+    "                   ['암사동', '암사1동', '암사2동', '암사3동'],\n",
+    "                   ['천호동', '천호1동', '천호2동', '천호3동'],\n",
+    "                   ['번동', '번1동', '번2동', '번3동'],\n",
+    "                   ['가양동', '가양1동', '가양2동', '가양3동'],\n",
+    "                   ['수유동', '수유1동', '수유2동', '수유3동'],\n",
+    "                   ['등촌동', '등촌1동', '등촌2동', '등촌3동'],\n",
+    "                   ['방화동', '방화1동', '방화2동', '방화3동'],\n",
+    "                   ['화곡동', '화곡1동', '화곡2동',  '화곡3동', '화곡4동', '화곡6동', '화곡8동', '화곡본동'],\n",
+    "                   ['구의동', '구의1동', '구의2동', '구의3동'],\n",
+    "                   ['자양동', '자양1동', '자양2동', '자양3동', '자양4동'],\n",
+    "                   ['개봉동', '개봉1동', '개봉2동', '개봉3동'],\n",
+    "                   ['고척동', '고척1동', '고척2동'],\n",
+    "                   ['중곡동', '중곡1동', '중곡2동', '중곡3동'],\n",
+    "                   ['구로동', '구로1동', '구로2동', '구로3동', '구로4동', '구로5동'],\n",
+    "                   ['개포동', '개포1동', '개포2동', '개포3동', '개포4동'],\n",
+    "                   ['오류동', '오류1동', '오류2동'],\n",
+    "                   ['독산동', '독산1동', '독산2동', '독산3동', '독산4동'],\n",
+    "                   ['시흥동', '시흥1동', '시흥2동', '시흥3동', '시흥4동', '시흥5동'],\n",
+    "                   ['공릉동', '공릉1동', '공릉2동'],\n",
+    "                   ['상계동', '상계1동', '상계2동', '상계5동', '상계8동', '상계9동', '상계10동', '상계3.4동', '상계6.7동'],\n",
+    "                   ['월계동', '월계1동', '월계2동', '월계3동'],\n",
+    "                   ['중계동', '중계본동', '중계1동', '중계4동', '중계2.3동'],\n",
+    "                   ['하계동', '하계1동', '하계2동'],\n",
+    "                   ['도봉동', '도봉1동', '도봉2동'],\n",
+    "                   ['방학동', '방학1동', '방학2동', '방학3동'],\n",
+    "                   ['쌍문동', '쌍문1동', '쌍문2동', '쌍문3동', '쌍문4동'],\n",
+    "                   ['창동', '창1동', '창2동', '창3동', '창4동', '창5동'],\n",
+    "                   ['답십리동', '답십리1동', '답십리2동'],\n",
+    "                   ['이문동', '이문1동', '이문2동'],\n",
+    "                   ['장안동', '장안1동', '장안2동'],\n",
+    "                   ['전농동', '전농1동', '전농2동'],\n",
+    "                   ['휘경동', '휘경1동', '휘경2동'],\n",
+    "                   ['노량진동', '노량진1동', '노량진2동'],\n",
+    "                   ['사당동', '사당1동', '사당2동', '사당3동', '사당4동', '사당5동'],\n",
+    "                   ['상도동', '상도1동', '상도2동', '상도3동', '상도4동'],\n",
+    "                   ['신대방동', '신대방1동', '신대방2동'],\n",
+    "                   ['성산동', '성산1동', '성산2동'],\n",
+    "                   ['신정동', '신정1동', '신정2동', '신정3동', '신정4동', '신정6동', '신정7동'],\n",
+    "                   ['망원동', '망원1동', '망원2동'],\n",
+    "                   ['남가좌동', '남가좌1동', '남가좌2동'],\n",
+    "                   ['북가좌동', '북가좌1동', '북가좌2동'],\n",
+    "                   ['홍은동', '홍은1동', '홍은2동'],\n",
+    "                   ['홍제동', '홍제1동', '홍제2동', '홍제3동'],\n",
+    "                   ['반포동', '반포본동', '반포1동', '반포2동', '반포3동', '반포4동'],\n",
+    "                   ['방배동', '방배본동', '방배1동', '방배2동', '방배3동', '방배4동'],\n",
+    "                   ['서초동', '서초1동', '서초2동', '서초3동', '서초4동'],\n",
+    "                   ['양재동', '양재1동', '양재2동'],\n",
+    "                   ['행당동', '행당1동', '행당2동'],\n",
+    "                   ['길음동', '길음1동', '길음2동'],\n",
+    "                   ['돈암동', '돈암1동', '돈암2동'],\n",
+    "                   ['장위동', '장위1동', '장위2동', '장위3동'],\n",
+    "                   ['정릉동', '정릉1동', '정릉2동', '정릉3동', '정릉4동'],\n",
+    "                   ['가락동', '가락본동', '가락1동', '가락2동'],\n",
+    "                   ['거여동', '거여1동', '거여2동'],\n",
+    "                   ['마천동', '마천1동', '마천2동'],\n",
+    "                   ['문정동', '문정1동', '문정2동'],\n",
+    "                   ['송파동', '송파1동', '송파2동'],\n",
+    "                   ['방이동',  '방이1동', '방이2동'],\n",
+    "                   ['잠실동', '잠실본동', '잠실2동', '잠실3동', '잠실4동', '잠실6동', '잠실7동'],\n",
+    "                   ['풍납동', '풍납1동', '풍납2동'],\n",
+    "                   ['목동', '목1동', '목2동', '목3동', '목4동'],\n",
+    "                   ['신월동', '신월1동', '신월2동', '신월3동', '신월4동', '신월5동', '신월6동', '신월7동'],\n",
+    "                   ['당산동', '당산1동', '당산2동'],\n",
+    "                   ['대림동', '대림1동', '대림2동', '대림3동'],\n",
+    "                   ['신길동', '신길1동', '신길3동', '신길4동', '신길5동', '신길6동', '신길7동'],\n",
+    "                   ['이촌동', '이촌1동', '이촌2동'],\n",
+    "                   ['이태원동', '이태원1동', '이태원2동'],\n",
+    "                   ['불광동', '불광1동', '불광2동'],\n",
+    "                   ['갈현동', '갈현1동', '갈현2동'],\n",
+    "                   ['응암동', '응암1동', '응암2동', '응암3동'],\n",
+    "                   ['숭인동', '숭인1동', '숭인2동'],\n",
+    "                   ['창신동', '창신1동', '창신2동', '창신3동'],\n",
+    "                   ['망우동', '망우본동', '망우3동'],\n",
+    "                   ['면목동', '면목본동', '면목2동', '면목4동', '면목5동', '면목7동', '면목3.8동'],\n",
+    "                   ['묵동', '묵1동', '묵2동'],\n",
+    "                   ['상봉동', '상봉1동', '상봉2동'],\n",
+    "                   ['신내동', '신내1동', '신내2동'],\n",
+    "                   ['중화동', '중화1동', '중화2동'],\n",
+    "                   ['월곡동', '월곡1동', '월곡2동']\n",
+    "                   ]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 48,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# 행정동을 합쳐 유사 행정동을 구하고 합친 인구와 면적을 사용하여 밀도를 다시 구하기\n",
+    "for dongs in dong_merge_list:\n",
+    "    dong_dict ={}\n",
+    "    dong_dict['동별(3)'] = dongs[0]\n",
+    "    dong_pop = 0\n",
+    "    dong_area = 0\n",
+    "    for dong in dongs[1:]:\n",
+    "        dong_pop += population_density_new.loc[population_density_new['동별(3)'] == dong, '인구 (명)'].values[0]\n",
+    "        dong_area += population_density_new.loc[population_density_new['동별(3)'] == dong, '면적 (㎢)'].values[0]\n",
+    "    dong_density = dong_pop / dong_area\n",
+    "    dong_dict['인구 (명)'] = dong_pop\n",
+    "    dong_dict['면적 (㎢)'] = dong_area\n",
+    "    dong_dict['인구밀도 (명/㎢)'] = dong_density\n",
+    "    population_density_new = population_density_new.append(dong_dict, ignore_index=True)\n",
+    "    "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 49,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# '인구밀도 (명/㎢)' 변수가 추가된 concat 데이터\n",
+    "concat = pd.merge(concat, population_density_new, left_on='행정동', right_on='동별(3)', how='inner').drop(['동별(3)', '인구 (명)', '면적 (㎢)'], axis=1)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 50,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/html": [
+       "<div>\n",
+       "<style scoped>\n",
+       "    .dataframe tbody tr th:only-of-type {\n",
+       "        vertical-align: middle;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe tbody tr th {\n",
+       "        vertical-align: top;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe thead th {\n",
+       "        text-align: right;\n",
+       "    }\n",
+       "</style>\n",
+       "<table border=\"1\" class=\"dataframe\">\n",
+       "  <thead>\n",
+       "    <tr style=\"text-align: right;\">\n",
+       "      <th></th>\n",
+       "      <th>행정동</th>\n",
+       "      <th>인구밀도 (명/㎢)</th>\n",
+       "    </tr>\n",
+       "  </thead>\n",
+       "  <tbody>\n",
+       "    <tr>\n",
+       "      <th>116389</th>\n",
+       "      <td>상일동</td>\n",
+       "      <td>17563.917526</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>998664</th>\n",
+       "      <td>신길동</td>\n",
+       "      <td>30567.469880</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>640228</th>\n",
+       "      <td>성산동</td>\n",
+       "      <td>20410.801394</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>327036</th>\n",
+       "      <td>구로동</td>\n",
+       "      <td>24740.264650</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>425729</th>\n",
+       "      <td>상계동</td>\n",
+       "      <td>12722.130102</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>696273</th>\n",
+       "      <td>연희동</td>\n",
+       "      <td>12271.000000</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>1101600</th>\n",
+       "      <td>면목동</td>\n",
+       "      <td>22971.547421</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>51960</th>\n",
+       "      <td>신사동</td>\n",
+       "      <td>8400.000000</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>329705</th>\n",
+       "      <td>구로동</td>\n",
+       "      <td>24740.264650</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>815890</th>\n",
+       "      <td>길음동</td>\n",
+       "      <td>41407.299270</td>\n",
+       "    </tr>\n",
+       "  </tbody>\n",
+       "</table>\n",
+       "</div>"
+      ],
+      "text/plain": [
+       "         행정동    인구밀도 (명/㎢)\n",
+       "116389   상일동  17563.917526\n",
+       "998664   신길동  30567.469880\n",
+       "640228   성산동  20410.801394\n",
+       "327036   구로동  24740.264650\n",
+       "425729   상계동  12722.130102\n",
+       "696273   연희동  12271.000000\n",
+       "1101600  면목동  22971.547421\n",
+       "51960    신사동   8400.000000\n",
+       "329705   구로동  24740.264650\n",
+       "815890   길음동  41407.299270"
+      ]
+     },
+     "execution_count": 50,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "# 확인을 위해 concat에서 랜덤으로 10개 샘플 뽑아보기\n",
+    "concat[['행정동', '인구밀도 (명/㎢)']].sample(n=10)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# 서울시 공동주택 아파트 데이터로 결측치 채우기"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 51,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "concat['등기신청일자'] = concat['등기신청일자'].replace(' ', np.nan)\n",
+    "concat['거래유형'] = concat['거래유형'].replace('-', np.nan)\n",
+    "concat['중개사소재지'] = concat['중개사소재지'].replace('-', np.nan)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 52,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "house_df_path = \"./서울시 공동주택 아파트 정보.csv\"\n",
+    "house_df = pd.read_csv(house_df_path, encoding='cp949')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 53,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# '도로명주소'을 기준으로 df_train의 결측치 ('아파트명'은 같은 아파트임에도 서로 일치하지 않는 항목이 많아서)\n",
+    "house_df['도로명주소'] = house_df['주소(도로명)'] + ' ' + house_df['주소(도로상세주소)']\n",
+    "house_df = house_df.drop_duplicates(subset='도로명주소')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 54,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# house_df_unique에서 '도로명주소'가 같은 경우 수치형인 열은 평균값으로, 범주형인 열은 최빈값으로 중복값 대체\n",
+    "def handle_duplicates(df):\n",
+    "    duplicates = df.duplicated(subset=['도로명주소'])\n",
+    "    for col in df.columns:\n",
+    "        if col != '도로명주소':\n",
+    "            if df[col].dtype == 'int64':\n",
+    "                df[col] = df.groupby('도로명주소')[col].transform(lambda x: x.mean() if not x.isnull().all() else x)\n",
+    "            else:\n",
+    "                df[col] = df.groupby('도로명주소')[col].transform(lambda x: x.mode().iloc[0] if not x.isnull().all() else x)\n",
+    "    df = df.drop_duplicates(subset=['도로명주소'])\n",
+    "    return df\n",
+    "\n",
+    "house_df = handle_duplicates(house_df)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 55,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# concat과 house_df_unique에 공통으로 존재하는 열 찾기\n",
+    "common_cols = []\n",
+    "for col_1 in (concat.columns):\n",
+    "    for col_2 in list(list(house_df.columns)):\n",
+    "        if col_1 == col_2:\n",
+    "            common_cols.append(col_1)\n",
+    "            break"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 56,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# concat의 결측치를 house_df_unique로 채우기\n",
+    "for col in common_cols:\n",
+    "    concat[col] = concat[col].fillna(concat['도로명'].map(house_df.set_index('도로명주소')[col]))\n",
+    "concat['아파트명'] = concat['아파트명'].fillna(concat['도로명'].map(house_df.set_index('도로명주소')['k-아파트명']))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# 세대별주차대수 변수 추가"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 57,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "concat['세대별주차대수'] = concat['주차대수']/concat['k-전체세대수']"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 58,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "261695"
+      ]
+     },
+     "execution_count": 58,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "concat['세대별주차대수'].isnull().sum()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 59,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "concat['세대별주차대수'] = concat['세대별주차대수'].replace(0, np.nan)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# 계약날짜 변수 생성"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 60,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# concat에 계약년월과 계약일을 합쳐 계약날짜 변수 생성 (8자리 정수)\n",
+    "concat['계약날짜'] = concat['계약년월'] * 100 + concat['계약일']"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# 변수 선택"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 61,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "concat_new = concat[['계약날짜', '동', '건축년도', '인구밀도 (명/㎢)', '전용면적(㎡)', '세대별주차대수', 'target', 'is_test']]"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# 테스트셋 분리"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 62,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "(1124347, 7) (9294, 7)\n"
+     ]
+    }
+   ],
+   "source": [
+    "# 이제 다시 train과 test dataset을 분할해줍니다. 위에서 제작해 놓았던 is_test 칼럼을 이용합니다.\n",
+    "dt_train = concat_new.query('is_test==0')\n",
+    "dt_test = concat_new.query('is_test==1')\n",
+    "\n",
+    "# 이제 is_test 칼럼은 drop해줍니다.\n",
+    "dt_train.drop(['is_test'], axis = 1, inplace=True)\n",
+    "dt_test.drop(['is_test'], axis = 1, inplace=True)\n",
+    "print(dt_train.shape, dt_test.shape)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 63,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "연속형 변수: ['계약날짜', '건축년도', '인구밀도 (명/㎢)', '전용면적(㎡)', '세대별주차대수', 'target']\n",
+      "범주형 변수: ['동']\n"
+     ]
+    }
+   ],
+   "source": [
+    "continuous_columns = []\n",
+    "categorical_columns = []\n",
+    "\n",
+    "for column in dt_train.columns:\n",
+    "    if pd.api.types.is_numeric_dtype(dt_train[column]):\n",
+    "        continuous_columns.append(column)\n",
+    "    else:\n",
+    "        categorical_columns.append(column)\n",
+    "\n",
+    "\n",
+    "print(\"연속형 변수:\", continuous_columns)\n",
+    "print(\"범주형 변수:\", categorical_columns)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 64,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "dt_test = dt_test.drop(columns = ['target'])"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# 라벨링"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 65,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "동\n",
+       "신문로2가     329833.333333\n",
+       "장충동1가     255131.818182\n",
+       "압구정동      203222.949968\n",
+       "용산동5가     188139.910569\n",
+       "홍파동       170336.419753\n",
+       "평동        167916.049383\n",
+       "청암동       167861.109091\n",
+       "반포동       165584.328383\n",
+       "한남동       163018.425437\n",
+       "회현동2가     150546.261682\n",
+       "서빙고동      141067.643678\n",
+       "주성동       140800.000000\n",
+       "대치동       137661.016096\n",
+       "도곡동       134878.969157\n",
+       "청담동       132711.905342\n",
+       "남대문로5가    129661.790123\n",
+       "하중동       128101.538700\n",
+       "한강로3가     126570.308625\n",
+       "잠실동       122151.909609\n",
+       "삼성동       118605.342231\n",
+       "Name: target, dtype: float64"
+      ]
+     },
+     "execution_count": 65,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "# '동'열 라벨 인코딩\n",
+    "dong_price = dt_train.groupby('동')['target'].agg('mean').sort_values(ascending=False)\n",
+    "dong_price[:20]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 66,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "  2%|▏         | 6/337 [00:00<00:16, 20.38it/s]"
+     ]
+    },
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "100%|██████████| 337/337 [00:17<00:00, 19.30it/s]\n"
+     ]
+    },
+    {
+     "data": {
+      "text/html": [
+       "<div>\n",
+       "<style scoped>\n",
+       "    .dataframe tbody tr th:only-of-type {\n",
+       "        vertical-align: middle;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe tbody tr th {\n",
+       "        vertical-align: top;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe thead th {\n",
+       "        text-align: right;\n",
+       "    }\n",
+       "</style>\n",
+       "<table border=\"1\" class=\"dataframe\">\n",
+       "  <thead>\n",
+       "    <tr style=\"text-align: right;\">\n",
+       "      <th></th>\n",
+       "      <th>계약날짜</th>\n",
+       "      <th>동</th>\n",
+       "      <th>건축년도</th>\n",
+       "      <th>인구밀도 (명/㎢)</th>\n",
+       "      <th>전용면적(㎡)</th>\n",
+       "      <th>세대별주차대수</th>\n",
+       "      <th>target</th>\n",
+       "    </tr>\n",
+       "  </thead>\n",
+       "  <tbody>\n",
+       "    <tr>\n",
+       "      <th>0</th>\n",
+       "      <td>20171208</td>\n",
+       "      <td>47</td>\n",
+       "      <td>1987</td>\n",
+       "      <td>11824.116743</td>\n",
+       "      <td>79.97</td>\n",
+       "      <td>0.97037</td>\n",
+       "      <td>124000.0</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>1</th>\n",
+       "      <td>20171222</td>\n",
+       "      <td>47</td>\n",
+       "      <td>1987</td>\n",
+       "      <td>11824.116743</td>\n",
+       "      <td>79.97</td>\n",
+       "      <td>0.97037</td>\n",
+       "      <td>123500.0</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>2</th>\n",
+       "      <td>20171228</td>\n",
+       "      <td>47</td>\n",
+       "      <td>1987</td>\n",
+       "      <td>11824.116743</td>\n",
+       "      <td>54.98</td>\n",
+       "      <td>0.97037</td>\n",
+       "      <td>91500.0</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>3</th>\n",
+       "      <td>20180103</td>\n",
+       "      <td>47</td>\n",
+       "      <td>1987</td>\n",
+       "      <td>11824.116743</td>\n",
+       "      <td>79.97</td>\n",
+       "      <td>0.97037</td>\n",
+       "      <td>130000.0</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>4</th>\n",
+       "      <td>20180108</td>\n",
+       "      <td>47</td>\n",
+       "      <td>1987</td>\n",
+       "      <td>11824.116743</td>\n",
+       "      <td>79.97</td>\n",
+       "      <td>0.97037</td>\n",
+       "      <td>117000.0</td>\n",
+       "    </tr>\n",
+       "  </tbody>\n",
+       "</table>\n",
+       "</div>"
+      ],
+      "text/plain": [
+       "       계약날짜   동  건축년도    인구밀도 (명/㎢)  전용면적(㎡)  세대별주차대수    target\n",
+       "0  20171208  47  1987  11824.116743    79.97  0.97037  124000.0\n",
+       "1  20171222  47  1987  11824.116743    79.97  0.97037  123500.0\n",
+       "2  20171228  47  1987  11824.116743    54.98  0.97037   91500.0\n",
+       "3  20180103  47  1987  11824.116743    79.97  0.97037  130000.0\n",
+       "4  20180108  47  1987  11824.116743    79.97  0.97037  117000.0"
+      ]
+     },
+     "execution_count": 66,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "# 가격기준으로 동을 정렬한 리스트를 바탕으로 dong에 대해 라벨 인코딩 진행 - 477 it.\n",
+    "for i, d in tqdm(enumerate(list(dong_price.index)), total=len(dong_price)):\n",
+    "    dt_train.loc[dt_train['동'] == d, '동'] = i\n",
+    "    dt_test.loc[dt_test['동'] == d, '동'] = i\n",
+    "dt_train.head()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 67,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "<class 'pandas.core.frame.DataFrame'>\n",
+      "Int64Index: 1124347 entries, 0 to 1133640\n",
+      "Data columns (total 7 columns):\n",
+      " #   Column      Non-Null Count    Dtype  \n",
+      "---  ------      --------------    -----  \n",
+      " 0   계약날짜        1124347 non-null  int64  \n",
+      " 1   동           1124347 non-null  int64  \n",
+      " 2   건축년도        1124347 non-null  int64  \n",
+      " 3   인구밀도 (명/㎢)  1124347 non-null  float64\n",
+      " 4   전용면적(㎡)     1124347 non-null  float64\n",
+      " 5   세대별주차대수     807635 non-null   float64\n",
+      " 6   target      1124347 non-null  float64\n",
+      "dtypes: float64(4), int64(3)\n",
+      "memory usage: 68.6 MB\n"
+     ]
+    }
+   ],
+   "source": [
+    "dt_train['동'] = dt_train['동'].astype('int64')\n",
+    "dt_test['동'] = dt_test['동'].astype('int64')\n",
+    "dt_train.info()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# 타겟값 로그변환"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 68,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/html": [
+       "<div>\n",
+       "<style scoped>\n",
+       "    .dataframe tbody tr th:only-of-type {\n",
+       "        vertical-align: middle;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe tbody tr th {\n",
+       "        vertical-align: top;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe thead th {\n",
+       "        text-align: right;\n",
+       "    }\n",
+       "</style>\n",
+       "<table border=\"1\" class=\"dataframe\">\n",
+       "  <thead>\n",
+       "    <tr style=\"text-align: right;\">\n",
+       "      <th></th>\n",
+       "      <th>계약날짜</th>\n",
+       "      <th>동</th>\n",
+       "      <th>건축년도</th>\n",
+       "      <th>인구밀도 (명/㎢)</th>\n",
+       "      <th>전용면적(㎡)</th>\n",
+       "      <th>세대별주차대수</th>\n",
+       "      <th>log_target</th>\n",
+       "    </tr>\n",
+       "  </thead>\n",
+       "  <tbody>\n",
+       "    <tr>\n",
+       "      <th>0</th>\n",
+       "      <td>20171208</td>\n",
+       "      <td>47</td>\n",
+       "      <td>1987</td>\n",
+       "      <td>11824.116743</td>\n",
+       "      <td>79.97</td>\n",
+       "      <td>0.97037</td>\n",
+       "      <td>11.728045</td>\n",
+       "    </tr>\n",
+       "  </tbody>\n",
+       "</table>\n",
+       "</div>"
+      ],
+      "text/plain": [
+       "       계약날짜   동  건축년도    인구밀도 (명/㎢)  전용면적(㎡)  세대별주차대수  log_target\n",
+       "0  20171208  47  1987  11824.116743    79.97  0.97037   11.728045"
+      ]
+     },
+     "execution_count": 68,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "# 가격 로그 변환 후 원래 가격 따로 저장\n",
+    "dt_train['log_target'] = np.log1p(dt_train['target'])\n",
+    "real_target = dt_train['target'] # 원래 가격\n",
+    "dt_train.drop('target', axis=1, inplace=True)\n",
+    "dt_train.head(1)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 69,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "train_X, train_y = dt_train.drop('log_target', axis=1), dt_train['log_target']"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# 하이퍼파라미터 튜닝"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 70,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from sklearn.model_selection import train_test_split\n",
+    "\n",
+    "def RMSE(y, y_pred):\n",
+    "    rmse = mean_squared_error(y, y_pred) ** 0.5\n",
+    "    return rmse\n",
+    "\n",
+    "train_X = train_X.sort_values(by='계약날짜')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 71,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "(899477, 6) (899477,) (224870, 6) (224870,)\n"
+     ]
+    }
+   ],
+   "source": [
+    "h_train_X, h_valid_X, h_train_y, h_valid_y = train_test_split(train_X, train_y, test_size=0.2, random_state=42)\n",
+    "print(h_train_X.shape, h_train_y.shape, h_valid_X.shape, h_valid_y.shape)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 72,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stderr",
+     "output_type": "stream",
+     "text": [
+      "[I 2024-01-23 11:58:51,267] A new study created in memory with name: no-name-f775c655-48ec-4eb3-a109-a50a7273f9f1\n",
+      "[I 2024-01-23 11:59:12,407] Trial 0 finished with value: 0.6376628876296769 and parameters: {'max_depth': 13, 'learning_rate': 1.3320229150659043e-08, 'n_estimators': 1938, 'min_child_samples': 76, 'subsample': 0.6315909175774905}. Best is trial 0 with value: 0.6376628876296769.\n",
+      "[I 2024-01-23 11:59:30,114] Trial 1 finished with value: 0.6376052848146189 and parameters: {'max_depth': 5, 'learning_rate': 1.5430400149097381e-07, 'n_estimators': 2306, 'min_child_samples': 21, 'subsample': 0.4337244827306443}. Best is trial 1 with value: 0.6376052848146189.\n",
+      "[I 2024-01-23 11:59:31,279] Trial 2 finished with value: 0.5518423225684086 and parameters: {'max_depth': 11, 'learning_rate': 0.005252427629146827, 'n_estimators': 111, 'min_child_samples': 54, 'subsample': 0.8422371309477078}. Best is trial 2 with value: 0.5518423225684086.\n",
+      "[I 2024-01-23 11:59:39,892] Trial 3 finished with value: 0.5981968640255726 and parameters: {'max_depth': 10, 'learning_rate': 0.00021405821746591817, 'n_estimators': 946, 'min_child_samples': 93, 'subsample': 0.7698715745641292}. Best is trial 2 with value: 0.5518423225684086.\n",
+      "[I 2024-01-23 11:59:50,668] Trial 4 finished with value: 0.6376494561428604 and parameters: {'max_depth': 10, 'learning_rate': 7.128863277996207e-08, 'n_estimators': 1183, 'min_child_samples': 69, 'subsample': 0.5996296351455978}. Best is trial 2 with value: 0.5518423225684086.\n",
+      "[I 2024-01-23 12:00:05,073] Trial 5 finished with value: 0.6209782250560854 and parameters: {'max_depth': 8, 'learning_rate': 5.08864167992051e-05, 'n_estimators': 1588, 'min_child_samples': 67, 'subsample': 0.6938050197112922}. Best is trial 2 with value: 0.5518423225684086.\n",
+      "[I 2024-01-23 12:00:29,988] Trial 6 finished with value: 0.6294538487039902 and parameters: {'max_depth': 13, 'learning_rate': 1.3485992516968212e-05, 'n_estimators': 2735, 'min_child_samples': 35, 'subsample': 0.4345676420333751}. Best is trial 2 with value: 0.5518423225684086.\n",
+      "[I 2024-01-23 12:00:50,001] Trial 7 finished with value: 0.6376453392978266 and parameters: {'max_depth': 6, 'learning_rate': 4.8295444901938926e-08, 'n_estimators': 2504, 'min_child_samples': 9, 'subsample': 0.7100430887666348}. Best is trial 2 with value: 0.5518423225684086.\n",
+      "[I 2024-01-23 12:00:56,345] Trial 8 finished with value: 0.554246034229508 and parameters: {'max_depth': 10, 'learning_rate': 0.0008236106883720722, 'n_estimators': 677, 'min_child_samples': 87, 'subsample': 0.5520731753100153}. Best is trial 2 with value: 0.5518423225684086.\n",
+      "[I 2024-01-23 12:01:22,587] Trial 9 finished with value: 0.6373043954821312 and parameters: {'max_depth': 12, 'learning_rate': 5.967195151630884e-07, 'n_estimators': 2664, 'min_child_samples': 36, 'subsample': 0.46529289303849874}. Best is trial 2 with value: 0.5518423225684086.\n",
+      "[I 2024-01-23 12:01:23,670] Trial 10 finished with value: 0.5674009731065915 and parameters: {'max_depth': 3, 'learning_rate': 0.007287079614451871, 'n_estimators': 125, 'min_child_samples': 50, 'subsample': 0.9370978022952945}. Best is trial 2 with value: 0.5518423225684086.\n",
+      "[I 2024-01-23 12:01:25,327] Trial 11 finished with value: 0.5149479232203479 and parameters: {'max_depth': 15, 'learning_rate': 0.009574195308117853, 'n_estimators': 134, 'min_child_samples': 99, 'subsample': 0.5200055418871649}. Best is trial 11 with value: 0.5149479232203479.\n",
+      "[I 2024-01-23 12:01:26,872] Trial 12 finished with value: 0.5184479588233409 and parameters: {'max_depth': 15, 'learning_rate': 0.0077642816743979, 'n_estimators': 151, 'min_child_samples': 51, 'subsample': 0.9988113820538724}. Best is trial 11 with value: 0.5149479232203479.\n",
+      "[I 2024-01-23 12:01:32,059] Trial 13 finished with value: 0.5679053674718132 and parameters: {'max_depth': 15, 'learning_rate': 0.0007775473618220168, 'n_estimators': 544, 'min_child_samples': 99, 'subsample': 0.5017422244950211}. Best is trial 11 with value: 0.5149479232203479.\n",
+      "[I 2024-01-23 12:01:37,058] Trial 14 finished with value: 0.6374991618797823 and parameters: {'max_depth': 15, 'learning_rate': 1.369511507989889e-06, 'n_estimators': 540, 'min_child_samples': 50, 'subsample': 0.5223234814923825}. Best is trial 11 with value: 0.5149479232203479.\n",
+      "[I 2024-01-23 12:01:48,031] Trial 15 finished with value: 0.504949008061115 and parameters: {'max_depth': 15, 'learning_rate': 0.0014510347218077318, 'n_estimators': 1196, 'min_child_samples': 79, 'subsample': 0.9312965015272958}. Best is trial 15 with value: 0.504949008061115.\n",
+      "[I 2024-01-23 12:02:00,803] Trial 16 finished with value: 0.5414428481618117 and parameters: {'max_depth': 13, 'learning_rate': 0.0005202191963130398, 'n_estimators': 1379, 'min_child_samples': 87, 'subsample': 0.8395523525290788}. Best is trial 15 with value: 0.504949008061115.\n",
+      "[I 2024-01-23 12:02:17,506] Trial 17 finished with value: 0.6124255475022515 and parameters: {'max_depth': 8, 'learning_rate': 6.790663195577398e-05, 'n_estimators': 1867, 'min_child_samples': 76, 'subsample': 0.5868354797272192}. Best is trial 15 with value: 0.504949008061115.\n",
+      "[I 2024-01-23 12:02:26,162] Trial 18 finished with value: 0.4907229967716857 and parameters: {'max_depth': 14, 'learning_rate': 0.0034360985974135998, 'n_estimators': 964, 'min_child_samples': 99, 'subsample': 0.6818140962688299}. Best is trial 18 with value: 0.4907229967716857.\n",
+      "[I 2024-01-23 12:02:34,905] Trial 19 finished with value: 0.5085636186629977 and parameters: {'max_depth': 13, 'learning_rate': 0.0016147128916887197, 'n_estimators': 955, 'min_child_samples': 83, 'subsample': 0.7067973780062928}. Best is trial 18 with value: 0.4907229967716857.\n",
+      "[I 2024-01-23 12:02:50,251] Trial 20 finished with value: 0.6353108734939492 and parameters: {'max_depth': 14, 'learning_rate': 6.144647016137447e-06, 'n_estimators': 1686, 'min_child_samples': 61, 'subsample': 0.857424596918981}. Best is trial 18 with value: 0.4907229967716857.\n",
+      "[I 2024-01-23 12:02:59,116] Trial 21 finished with value: 0.5067927835157462 and parameters: {'max_depth': 12, 'learning_rate': 0.0017209504786874722, 'n_estimators': 949, 'min_child_samples': 81, 'subsample': 0.7150764228890707}. Best is trial 18 with value: 0.4907229967716857.\n",
+      "[I 2024-01-23 12:03:09,527] Trial 22 finished with value: 0.49406204330779124 and parameters: {'max_depth': 12, 'learning_rate': 0.002353258739558442, 'n_estimators': 1159, 'min_child_samples': 79, 'subsample': 0.7491764637705421}. Best is trial 18 with value: 0.4907229967716857.\n",
+      "[I 2024-01-23 12:03:21,420] Trial 23 finished with value: 0.604416007514556 and parameters: {'max_depth': 14, 'learning_rate': 0.0001297916309400088, 'n_estimators': 1276, 'min_child_samples': 93, 'subsample': 0.7757811186061336}. Best is trial 18 with value: 0.4907229967716857.\n",
+      "[I 2024-01-23 12:03:31,206] Trial 24 finished with value: 0.4967683927892506 and parameters: {'max_depth': 12, 'learning_rate': 0.0022046967080374463, 'n_estimators': 1089, 'min_child_samples': 71, 'subsample': 0.9128646385207088}. Best is trial 18 with value: 0.4907229967716857.\n",
+      "[I 2024-01-23 12:03:38,006] Trial 25 finished with value: 0.5876318298204948 and parameters: {'max_depth': 11, 'learning_rate': 0.00036315218788892306, 'n_estimators': 745, 'min_child_samples': 70, 'subsample': 0.7557272942875836}. Best is trial 18 with value: 0.4907229967716857.\n",
+      "[I 2024-01-23 12:03:51,559] Trial 26 finished with value: 0.6312477210794056 and parameters: {'max_depth': 12, 'learning_rate': 1.950703342719865e-05, 'n_estimators': 1468, 'min_child_samples': 61, 'subsample': 0.6484046811653436}. Best is trial 18 with value: 0.4907229967716857.\n",
+      "[I 2024-01-23 12:04:01,457] Trial 27 finished with value: 0.4932080951793728 and parameters: {'max_depth': 9, 'learning_rate': 0.0027554265494263382, 'n_estimators': 1064, 'min_child_samples': 91, 'subsample': 0.9017666951161556}. Best is trial 18 with value: 0.4907229967716857.\n",
+      "[I 2024-01-23 12:04:04,859] Trial 28 finished with value: 0.5104349245498726 and parameters: {'max_depth': 8, 'learning_rate': 0.0041407128480423, 'n_estimators': 361, 'min_child_samples': 92, 'subsample': 0.8075753961252347}. Best is trial 18 with value: 0.4907229967716857.\n",
+      "[I 2024-01-23 12:04:24,409] Trial 29 finished with value: 0.5610830424615603 and parameters: {'max_depth': 9, 'learning_rate': 0.00023071577269449152, 'n_estimators': 2117, 'min_child_samples': 100, 'subsample': 0.6643695583338018}. Best is trial 18 with value: 0.4907229967716857.\n",
+      "[I 2024-01-23 12:04:38,676] Trial 30 finished with value: 0.6364995445439676 and parameters: {'max_depth': 6, 'learning_rate': 3.4359382820313137e-06, 'n_estimators': 1762, 'min_child_samples': 87, 'subsample': 0.6227224929870971}. Best is trial 18 with value: 0.4907229967716857.\n",
+      "[I 2024-01-23 12:04:48,289] Trial 31 finished with value: 0.49400665595984977 and parameters: {'max_depth': 11, 'learning_rate': 0.0025975952888358045, 'n_estimators': 1059, 'min_child_samples': 76, 'subsample': 0.9088375692677898}. Best is trial 18 with value: 0.4907229967716857.\n",
+      "[I 2024-01-23 12:04:55,632] Trial 32 finished with value: 0.49780702226592244 and parameters: {'max_depth': 11, 'learning_rate': 0.00289089499508422, 'n_estimators': 793, 'min_child_samples': 92, 'subsample': 0.983081582192864}. Best is trial 18 with value: 0.4907229967716857.\n",
+      "[I 2024-01-23 12:05:05,256] Trial 33 finished with value: 0.5397703738401131 and parameters: {'max_depth': 9, 'learning_rate': 0.0007065549733999893, 'n_estimators': 1053, 'min_child_samples': 75, 'subsample': 0.8789934104562789}. Best is trial 18 with value: 0.4907229967716857.\n",
+      "[I 2024-01-23 12:05:18,611] Trial 34 finished with value: 0.4847254828707472 and parameters: {'max_depth': 14, 'learning_rate': 0.0037580342652760207, 'n_estimators': 1417, 'min_child_samples': 82, 'subsample': 0.7523420774123141}. Best is trial 34 with value: 0.4847254828707472.\n",
+      "[I 2024-01-23 12:05:45,776] Trial 35 finished with value: 0.47980908559275387 and parameters: {'max_depth': 14, 'learning_rate': 0.0036760669033323577, 'n_estimators': 2985, 'min_child_samples': 85, 'subsample': 0.8114491741269478}. Best is trial 35 with value: 0.47980908559275387.\n",
+      "[I 2024-01-23 12:06:05,601] Trial 36 finished with value: 0.5901443045614775 and parameters: {'max_depth': 14, 'learning_rate': 0.0001166367226654408, 'n_estimators': 2175, 'min_child_samples': 85, 'subsample': 0.7903598681344484}. Best is trial 35 with value: 0.47980908559275387.\n",
+      "[I 2024-01-23 12:06:19,512] Trial 37 finished with value: 0.6376652094136074 and parameters: {'max_depth': 14, 'learning_rate': 1.0247621894239389e-08, 'n_estimators': 1532, 'min_child_samples': 95, 'subsample': 0.8358545825692969}. Best is trial 35 with value: 0.47980908559275387.\n",
+      "[I 2024-01-23 12:06:32,046] Trial 38 finished with value: 0.6281795566108113 and parameters: {'max_depth': 13, 'learning_rate': 3.1665537199340834e-05, 'n_estimators': 1352, 'min_child_samples': 88, 'subsample': 0.6721497364483812}. Best is trial 35 with value: 0.47980908559275387.\n",
+      "[I 2024-01-23 12:06:55,108] Trial 39 finished with value: 0.480798439054277 and parameters: {'max_depth': 7, 'learning_rate': 0.0039868416957023695, 'n_estimators': 2819, 'min_child_samples': 63, 'subsample': 0.7342613508899433}. Best is trial 35 with value: 0.47980908559275387.\n",
+      "[I 2024-01-23 12:07:17,896] Trial 40 finished with value: 0.48007778199033324 and parameters: {'max_depth': 6, 'learning_rate': 0.005046875968987154, 'n_estimators': 2981, 'min_child_samples': 63, 'subsample': 0.7441682184946057}. Best is trial 35 with value: 0.47980908559275387.\n",
+      "[I 2024-01-23 12:07:40,562] Trial 41 finished with value: 0.48016625574123634 and parameters: {'max_depth': 6, 'learning_rate': 0.005042699310058896, 'n_estimators': 2963, 'min_child_samples': 63, 'subsample': 0.7369394752045878}. Best is trial 35 with value: 0.47980908559275387.\n",
+      "[I 2024-01-23 12:08:01,846] Trial 42 finished with value: 0.47998257298626273 and parameters: {'max_depth': 6, 'learning_rate': 0.005546669358422389, 'n_estimators': 2830, 'min_child_samples': 61, 'subsample': 0.73361548067065}. Best is trial 35 with value: 0.47980908559275387.\n",
+      "[I 2024-01-23 12:08:24,129] Trial 43 finished with value: 0.4786307202658376 and parameters: {'max_depth': 6, 'learning_rate': 0.008406637906950022, 'n_estimators': 2990, 'min_child_samples': 60, 'subsample': 0.7280921202136772}. Best is trial 43 with value: 0.4786307202658376.\n",
+      "[I 2024-01-23 12:08:41,512] Trial 44 finished with value: 0.4821456891794031 and parameters: {'max_depth': 4, 'learning_rate': 0.00764000159111786, 'n_estimators': 2955, 'min_child_samples': 43, 'subsample': 0.82046827170197}. Best is trial 43 with value: 0.4786307202658376.\n",
+      "[I 2024-01-23 12:08:58,748] Trial 45 finished with value: 0.47912395592429824 and parameters: {'max_depth': 5, 'learning_rate': 0.009907064808310606, 'n_estimators': 2505, 'min_child_samples': 56, 'subsample': 0.6323229921159268}. Best is trial 43 with value: 0.4786307202658376.\n",
+      "[I 2024-01-23 12:09:17,893] Trial 46 finished with value: 0.5018298103598385 and parameters: {'max_depth': 5, 'learning_rate': 0.0011886133712346299, 'n_estimators': 2502, 'min_child_samples': 56, 'subsample': 0.6263185164395111}. Best is trial 43 with value: 0.4786307202658376.\n",
+      "[I 2024-01-23 12:09:35,522] Trial 47 finished with value: 0.4789955746570271 and parameters: {'max_depth': 5, 'learning_rate': 0.009978686746239111, 'n_estimators': 2564, 'min_child_samples': 42, 'subsample': 0.5872603179941573}. Best is trial 43 with value: 0.4786307202658376.\n",
+      "[I 2024-01-23 12:09:50,801] Trial 48 finished with value: 0.48149673657722075 and parameters: {'max_depth': 4, 'learning_rate': 0.00994628208823736, 'n_estimators': 2567, 'min_child_samples': 29, 'subsample': 0.5872273231039569}. Best is trial 43 with value: 0.4786307202658376.\n",
+      "[I 2024-01-23 12:10:08,773] Trial 49 finished with value: 0.5516529194729944 and parameters: {'max_depth': 5, 'learning_rate': 0.00034390443302938136, 'n_estimators': 2374, 'min_child_samples': 42, 'subsample': 0.6054919964169573}. Best is trial 43 with value: 0.4786307202658376.\n",
+      "[I 2024-01-23 12:10:23,730] Trial 50 finished with value: 0.5321761503328585 and parameters: {'max_depth': 3, 'learning_rate': 0.0010347650221019507, 'n_estimators': 2752, 'min_child_samples': 44, 'subsample': 0.5681470533397979}. Best is trial 43 with value: 0.4786307202658376.\n",
+      "[I 2024-01-23 12:10:46,084] Trial 51 finished with value: 0.4787454066798544 and parameters: {'max_depth': 7, 'learning_rate': 0.007292856183807254, 'n_estimators': 2814, 'min_child_samples': 57, 'subsample': 0.5482912703520932}. Best is trial 43 with value: 0.4786307202658376.\n",
+      "[I 2024-01-23 12:11:03,730] Trial 52 finished with value: 0.637656445990928 and parameters: {'max_depth': 4, 'learning_rate': 2.7390447696285398e-08, 'n_estimators': 2823, 'min_child_samples': 57, 'subsample': 0.5456918992205803}. Best is trial 43 with value: 0.4786307202658376.\n",
+      "[I 2024-01-23 12:11:24,744] Trial 53 finished with value: 0.4790609817944726 and parameters: {'max_depth': 7, 'learning_rate': 0.006749918602456312, 'n_estimators': 2637, 'min_child_samples': 47, 'subsample': 0.4741440871956416}. Best is trial 43 with value: 0.4786307202658376.\n",
+      "[I 2024-01-23 12:11:44,952] Trial 54 finished with value: 0.4784719090598931 and parameters: {'max_depth': 7, 'learning_rate': 0.0097872965636796, 'n_estimators': 2659, 'min_child_samples': 28, 'subsample': 0.4823873153473015}. Best is trial 54 with value: 0.4784719090598931.\n",
+      "[I 2024-01-23 12:12:05,483] Trial 55 finished with value: 0.4788714689927727 and parameters: {'max_depth': 7, 'learning_rate': 0.007360653824376361, 'n_estimators': 2623, 'min_child_samples': 15, 'subsample': 0.4002954135641201}. Best is trial 54 with value: 0.4784719090598931.\n",
+      "[I 2024-01-23 12:12:24,166] Trial 56 finished with value: 0.4794996500277654 and parameters: {'max_depth': 7, 'learning_rate': 0.006449884202487304, 'n_estimators': 2323, 'min_child_samples': 11, 'subsample': 0.40556187143589995}. Best is trial 54 with value: 0.4784719090598931.\n",
+      "[I 2024-01-23 12:12:46,928] Trial 57 finished with value: 0.4898205196050316 and parameters: {'max_depth': 7, 'learning_rate': 0.0015332761368071835, 'n_estimators': 2631, 'min_child_samples': 21, 'subsample': 0.4748926293476428}. Best is trial 54 with value: 0.4784719090598931.\n",
+      "[I 2024-01-23 12:13:09,575] Trial 58 finished with value: 0.6375187205903016 and parameters: {'max_depth': 7, 'learning_rate': 2.72519174078729e-07, 'n_estimators': 2675, 'min_child_samples': 32, 'subsample': 0.4513799788361157}. Best is trial 54 with value: 0.4784719090598931.\n",
+      "[I 2024-01-23 12:13:34,852] Trial 59 finished with value: 0.5115170195305018 and parameters: {'max_depth': 8, 'learning_rate': 0.0006018739098070637, 'n_estimators': 2413, 'min_child_samples': 24, 'subsample': 0.4905918346935803}. Best is trial 54 with value: 0.4784719090598931.\n",
+      "[I 2024-01-23 12:13:51,630] Trial 60 finished with value: 0.479154466539118 and parameters: {'max_depth': 8, 'learning_rate': 0.007877719380806971, 'n_estimators': 2028, 'min_child_samples': 16, 'subsample': 0.41019538972965924}. Best is trial 54 with value: 0.4784719090598931.\n",
+      "[I 2024-01-23 12:14:08,916] Trial 61 finished with value: 0.47942480946367405 and parameters: {'max_depth': 5, 'learning_rate': 0.00893066066854477, 'n_estimators': 2485, 'min_child_samples': 47, 'subsample': 0.5272625648920941}. Best is trial 54 with value: 0.4784719090598931.\n",
+      "[I 2024-01-23 12:14:28,852] Trial 62 finished with value: 0.48868201240193426 and parameters: {'max_depth': 7, 'learning_rate': 0.001970243089120815, 'n_estimators': 2255, 'min_child_samples': 38, 'subsample': 0.43509924513344544}. Best is trial 54 with value: 0.4784719090598931.\n",
+      "[I 2024-01-23 12:14:46,710] Trial 63 finished with value: 0.4790097050781931 and parameters: {'max_depth': 5, 'learning_rate': 0.009804641058566965, 'n_estimators': 2600, 'min_child_samples': 53, 'subsample': 0.4944350513779212}. Best is trial 54 with value: 0.4784719090598931.\n",
+      "[I 2024-01-23 12:15:07,614] Trial 64 finished with value: 0.48037793177671356 and parameters: {'max_depth': 6, 'learning_rate': 0.005231337989234624, 'n_estimators': 2742, 'min_child_samples': 48, 'subsample': 0.49691287865624034}. Best is trial 54 with value: 0.4784719090598931.\n",
+      "[I 2024-01-23 12:15:27,802] Trial 65 finished with value: 0.5049931451116589 and parameters: {'max_depth': 5, 'learning_rate': 0.0009654377710910351, 'n_estimators': 2640, 'min_child_samples': 52, 'subsample': 0.46773050727122895}. Best is trial 54 with value: 0.4784719090598931.\n",
+      "[I 2024-01-23 12:15:45,704] Trial 66 finished with value: 0.4996447222815369 and parameters: {'max_depth': 4, 'learning_rate': 0.0022042921276333076, 'n_estimators': 2821, 'min_child_samples': 38, 'subsample': 0.5096193682510114}. Best is trial 54 with value: 0.4784719090598931.\n",
+      "[I 2024-01-23 12:16:07,649] Trial 67 finished with value: 0.4796913324181352 and parameters: {'max_depth': 6, 'learning_rate': 0.00573676184180296, 'n_estimators': 2877, 'min_child_samples': 27, 'subsample': 0.5445836835362462}. Best is trial 54 with value: 0.4784719090598931.\n",
+      "[I 2024-01-23 12:16:29,098] Trial 68 finished with value: 0.4821411378750383 and parameters: {'max_depth': 7, 'learning_rate': 0.00338152536454703, 'n_estimators': 2570, 'min_child_samples': 14, 'subsample': 0.4213019899064101}. Best is trial 54 with value: 0.4784719090598931.\n",
+      "[I 2024-01-23 12:16:50,194] Trial 69 finished with value: 0.478478097924936 and parameters: {'max_depth': 8, 'learning_rate': 0.00985340619550655, 'n_estimators': 2704, 'min_child_samples': 47, 'subsample': 0.4515787872961347}. Best is trial 54 with value: 0.4784719090598931.\n",
+      "[I 2024-01-23 12:17:12,515] Trial 70 finished with value: 0.48956846710996926 and parameters: {'max_depth': 10, 'learning_rate': 0.0015143973377702844, 'n_estimators': 2429, 'min_child_samples': 54, 'subsample': 0.4455893293560362}. Best is trial 54 with value: 0.4784719090598931.\n",
+      "[I 2024-01-23 12:17:34,273] Trial 71 finished with value: 0.47905182667467394 and parameters: {'max_depth': 8, 'learning_rate': 0.00658289808033887, 'n_estimators': 2723, 'min_child_samples': 5, 'subsample': 0.4807516977481785}. Best is trial 54 with value: 0.4784719090598931.\n",
+      "[I 2024-01-23 12:17:56,520] Trial 72 finished with value: 0.47837247933132027 and parameters: {'max_depth': 9, 'learning_rate': 0.00992942989740615, 'n_estimators': 2908, 'min_child_samples': 5, 'subsample': 0.48827525974665814}. Best is trial 72 with value: 0.47837247933132027.\n",
+      "[I 2024-01-23 12:18:18,409] Trial 73 finished with value: 0.4784154231881363 and parameters: {'max_depth': 9, 'learning_rate': 0.009582774850670253, 'n_estimators': 2885, 'min_child_samples': 5, 'subsample': 0.45250657692052937}. Best is trial 72 with value: 0.47837247933132027.\n",
+      "[I 2024-01-23 12:18:44,266] Trial 74 finished with value: 0.48127537895398603 and parameters: {'max_depth': 9, 'learning_rate': 0.0030437978947363046, 'n_estimators': 2909, 'min_child_samples': 5, 'subsample': 0.4556621064657928}. Best is trial 72 with value: 0.47837247933132027.\n",
+      "[I 2024-01-23 12:19:08,403] Trial 75 finished with value: 0.47998204352992563 and parameters: {'max_depth': 10, 'learning_rate': 0.004092162671130061, 'n_estimators': 2737, 'min_child_samples': 9, 'subsample': 0.4241004576926172}. Best is trial 72 with value: 0.47837247933132027.\n",
+      "[I 2024-01-23 12:19:34,724] Trial 76 finished with value: 0.4816827776131802 and parameters: {'max_depth': 10, 'learning_rate': 0.0027752896932385068, 'n_estimators': 2917, 'min_child_samples': 15, 'subsample': 0.43765753472296887}. Best is trial 72 with value: 0.47837247933132027.\n",
+      "[I 2024-01-23 12:19:58,599] Trial 77 finished with value: 0.4797501507324305 and parameters: {'max_depth': 8, 'learning_rate': 0.004463083289411539, 'n_estimators': 2876, 'min_child_samples': 20, 'subsample': 0.532806172858132}. Best is trial 72 with value: 0.47837247933132027.\n",
+      "[I 2024-01-23 12:20:23,688] Trial 78 finished with value: 0.636840630922193 and parameters: {'max_depth': 9, 'learning_rate': 1.3118097725088192e-06, 'n_estimators': 2777, 'min_child_samples': 10, 'subsample': 0.5137585448791904}. Best is trial 72 with value: 0.47837247933132027.\n",
+      "[I 2024-01-23 12:20:50,189] Trial 79 finished with value: 0.484064480677826 and parameters: {'max_depth': 9, 'learning_rate': 0.0021129993958781726, 'n_estimators': 2987, 'min_child_samples': 18, 'subsample': 0.5584527283837635}. Best is trial 72 with value: 0.47837247933132027.\n",
+      "[I 2024-01-23 12:21:12,141] Trial 80 finished with value: 0.478912526609799 and parameters: {'max_depth': 8, 'learning_rate': 0.0065244970286463195, 'n_estimators': 2683, 'min_child_samples': 7, 'subsample': 0.4624441753999421}. Best is trial 72 with value: 0.47837247933132027.\n",
+      "[I 2024-01-23 12:21:34,140] Trial 81 finished with value: 0.4791075567464405 and parameters: {'max_depth': 8, 'learning_rate': 0.006283528539723305, 'n_estimators': 2691, 'min_child_samples': 12, 'subsample': 0.46373181566212085}. Best is trial 72 with value: 0.47837247933132027.\n",
+      "[I 2024-01-23 12:21:53,600] Trial 82 finished with value: 0.4786021209161506 and parameters: {'max_depth': 8, 'learning_rate': 0.009383226375137393, 'n_estimators': 2548, 'min_child_samples': 7, 'subsample': 0.42300739333612836}. Best is trial 72 with value: 0.47837247933132027.\n",
+      "[I 2024-01-23 12:22:17,956] Trial 83 finished with value: 0.47965888461279094 and parameters: {'max_depth': 8, 'learning_rate': 0.004455823126967667, 'n_estimators': 2887, 'min_child_samples': 7, 'subsample': 0.421123639732692}. Best is trial 72 with value: 0.47837247933132027.\n",
+      "[I 2024-01-23 12:22:40,360] Trial 84 finished with value: 0.47867239746297807 and parameters: {'max_depth': 9, 'learning_rate': 0.007099384614590865, 'n_estimators': 2774, 'min_child_samples': 9, 'subsample': 0.4117407141862032}. Best is trial 72 with value: 0.47837247933132027.\n",
+      "[I 2024-01-23 12:23:05,094] Trial 85 finished with value: 0.48130575259313335 and parameters: {'max_depth': 9, 'learning_rate': 0.0031827766800784653, 'n_estimators': 2823, 'min_child_samples': 13, 'subsample': 0.40349580063768015}. Best is trial 72 with value: 0.47837247933132027.\n",
+      "[I 2024-01-23 12:23:24,598] Trial 86 finished with value: 0.4784255376118312 and parameters: {'max_depth': 9, 'learning_rate': 0.009980262182764717, 'n_estimators': 2511, 'min_child_samples': 8, 'subsample': 0.4138372807562209}. Best is trial 72 with value: 0.47837247933132027.\n",
+      "[I 2024-01-23 12:23:44,026] Trial 87 finished with value: 0.48038261881959515 and parameters: {'max_depth': 9, 'learning_rate': 0.004644605548619214, 'n_estimators': 2219, 'min_child_samples': 9, 'subsample': 0.4141273584528542}. Best is trial 72 with value: 0.47837247933132027.\n",
+      "[I 2024-01-23 12:24:07,005] Trial 88 finished with value: 0.4842755709467156 and parameters: {'max_depth': 10, 'learning_rate': 0.0024065509373311575, 'n_estimators': 2493, 'min_child_samples': 7, 'subsample': 0.4423296869719061}. Best is trial 72 with value: 0.47837247933132027.\n",
+      "[I 2024-01-23 12:24:32,292] Trial 89 finished with value: 0.6320939664308564 and parameters: {'max_depth': 9, 'learning_rate': 8.945590860611897e-06, 'n_estimators': 2789, 'min_child_samples': 58, 'subsample': 0.4309095338040998}. Best is trial 72 with value: 0.47837247933132027.\n",
+      "[I 2024-01-23 12:24:51,315] Trial 90 finished with value: 0.47856729305795054 and parameters: {'max_depth': 9, 'learning_rate': 0.009759605864836755, 'n_estimators': 2338, 'min_child_samples': 68, 'subsample': 0.42926647046902344}. Best is trial 72 with value: 0.47837247933132027.\n",
+      "[I 2024-01-23 12:25:14,901] Trial 91 finished with value: 0.47829892969810633 and parameters: {'max_depth': 9, 'learning_rate': 0.009404180573311752, 'n_estimators': 2999, 'min_child_samples': 65, 'subsample': 0.4520269913445352}. Best is trial 91 with value: 0.47829892969810633.\n",
+      "[I 2024-01-23 12:25:33,907] Trial 92 finished with value: 0.4785391640945251 and parameters: {'max_depth': 9, 'learning_rate': 0.009377124520767796, 'n_estimators': 2333, 'min_child_samples': 67, 'subsample': 0.45057246734816886}. Best is trial 91 with value: 0.47829892969810633.\n",
+      "[I 2024-01-23 12:25:52,531] Trial 93 finished with value: 0.47857973142578664 and parameters: {'max_depth': 10, 'learning_rate': 0.009844608357166749, 'n_estimators': 2317, 'min_child_samples': 68, 'subsample': 0.44925152962544346}. Best is trial 91 with value: 0.47829892969810633.\n",
+      "[I 2024-01-23 12:26:11,391] Trial 94 finished with value: 0.4785819551919368 and parameters: {'max_depth': 10, 'learning_rate': 0.009855545675652631, 'n_estimators': 2319, 'min_child_samples': 67, 'subsample': 0.45139416811256167}. Best is trial 91 with value: 0.47829892969810633.\n",
+      "[I 2024-01-23 12:26:30,278] Trial 95 finished with value: 0.4802247040844612 and parameters: {'max_depth': 11, 'learning_rate': 0.004962570224336797, 'n_estimators': 2093, 'min_child_samples': 67, 'subsample': 0.45472893821711124}. Best is trial 91 with value: 0.47829892969810633.\n",
+      "[I 2024-01-23 12:26:47,981] Trial 96 finished with value: 0.48294487762797944 and parameters: {'max_depth': 10, 'learning_rate': 0.003564325878787832, 'n_estimators': 1946, 'min_child_samples': 72, 'subsample': 0.48730072531334245}. Best is trial 91 with value: 0.47829892969810633.\n",
+      "[I 2024-01-23 12:27:07,362] Trial 97 finished with value: 0.47853698047921356 and parameters: {'max_depth': 10, 'learning_rate': 0.009886677029128295, 'n_estimators': 2337, 'min_child_samples': 67, 'subsample': 0.4458832325377275}. Best is trial 91 with value: 0.47829892969810633.\n",
+      "[I 2024-01-23 12:27:28,099] Trial 98 finished with value: 0.479633788122092 and parameters: {'max_depth': 10, 'learning_rate': 0.00524610583236304, 'n_estimators': 2370, 'min_child_samples': 69, 'subsample': 0.4432917466920494}. Best is trial 91 with value: 0.47829892969810633.\n",
+      "[I 2024-01-23 12:27:46,540] Trial 99 finished with value: 0.49459957057777076 and parameters: {'max_depth': 11, 'learning_rate': 0.0012920982471033983, 'n_estimators': 2068, 'min_child_samples': 78, 'subsample': 0.4337476883717465}. Best is trial 91 with value: 0.47829892969810633.\n"
+     ]
+    }
+   ],
+   "source": [
+    "from optuna.samplers import TPESampler\n",
+    "\n",
+    "sampler = TPESampler(seed=10)\n",
+    "\n",
+    "def objective1(trial):\n",
+    "    dtrain = lgb.Dataset(h_train_X, label=h_train_y)\n",
+    "    dtest = lgb.Dataset(h_valid_X, label=h_valid_y)\n",
+    "\n",
+    "    param = {\n",
+    "        'objective': 'regression', # 회귀\n",
+    "        'verbose': -1,\n",
+    "        'metric': 'rmse', \n",
+    "        'max_depth': trial.suggest_int('max_depth',3, 15),\n",
+    "        'learning_rate': trial.suggest_loguniform(\"learning_rate\", 1e-8, 1e-2),\n",
+    "        'n_estimators': trial.suggest_int('n_estimators', 100, 3000),\n",
+    "        'min_child_samples': trial.suggest_int('min_child_samples', 5, 100),\n",
+    "        'subsample': trial.suggest_loguniform('subsample', 0.4, 1),\n",
+    "    }\n",
+    "\n",
+    "    model = lgb.LGBMRegressor(**param)\n",
+    "    lgb_model = model.fit(h_train_X, h_train_y, eval_set=[(h_valid_X, h_valid_y)])\n",
+    "    rmse = RMSE(h_valid_y, lgb_model.predict(h_valid_X))\n",
+    "    return rmse\n",
+    "        \n",
+    "study_lgb = optuna.create_study(direction='minimize', sampler=sampler)\n",
+    "study_lgb.optimize(objective1, n_trials=100)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 77,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/html": [
+       "<div>\n",
+       "<style scoped>\n",
+       "    .dataframe tbody tr th:only-of-type {\n",
+       "        vertical-align: middle;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe tbody tr th {\n",
+       "        vertical-align: top;\n",
+       "    }\n",
+       "\n",
+       "    .dataframe thead th {\n",
+       "        text-align: right;\n",
+       "    }\n",
+       "</style>\n",
+       "<table border=\"1\" class=\"dataframe\">\n",
+       "  <thead>\n",
+       "    <tr style=\"text-align: right;\">\n",
+       "      <th></th>\n",
+       "      <th>Idx</th>\n",
+       "      <th>Values</th>\n",
+       "    </tr>\n",
+       "  </thead>\n",
+       "  <tbody>\n",
+       "    <tr>\n",
+       "      <th>91</th>\n",
+       "      <td>91</td>\n",
+       "      <td>0.478299</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>72</th>\n",
+       "      <td>72</td>\n",
+       "      <td>0.478372</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>73</th>\n",
+       "      <td>73</td>\n",
+       "      <td>0.478415</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>86</th>\n",
+       "      <td>86</td>\n",
+       "      <td>0.478426</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>54</th>\n",
+       "      <td>54</td>\n",
+       "      <td>0.478472</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>69</th>\n",
+       "      <td>69</td>\n",
+       "      <td>0.478478</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>97</th>\n",
+       "      <td>97</td>\n",
+       "      <td>0.478537</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>92</th>\n",
+       "      <td>92</td>\n",
+       "      <td>0.478539</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>90</th>\n",
+       "      <td>90</td>\n",
+       "      <td>0.478567</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>93</th>\n",
+       "      <td>93</td>\n",
+       "      <td>0.478580</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>94</th>\n",
+       "      <td>94</td>\n",
+       "      <td>0.478582</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>82</th>\n",
+       "      <td>82</td>\n",
+       "      <td>0.478602</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>43</th>\n",
+       "      <td>43</td>\n",
+       "      <td>0.478631</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>84</th>\n",
+       "      <td>84</td>\n",
+       "      <td>0.478672</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>51</th>\n",
+       "      <td>51</td>\n",
+       "      <td>0.478745</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>55</th>\n",
+       "      <td>55</td>\n",
+       "      <td>0.478871</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>80</th>\n",
+       "      <td>80</td>\n",
+       "      <td>0.478913</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>47</th>\n",
+       "      <td>47</td>\n",
+       "      <td>0.478996</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>63</th>\n",
+       "      <td>63</td>\n",
+       "      <td>0.479010</td>\n",
+       "    </tr>\n",
+       "    <tr>\n",
+       "      <th>71</th>\n",
+       "      <td>71</td>\n",
+       "      <td>0.479052</td>\n",
+       "    </tr>\n",
+       "  </tbody>\n",
+       "</table>\n",
+       "</div>"
+      ],
+      "text/plain": [
+       "    Idx    Values\n",
+       "91   91  0.478299\n",
+       "72   72  0.478372\n",
+       "73   73  0.478415\n",
+       "86   86  0.478426\n",
+       "54   54  0.478472\n",
+       "69   69  0.478478\n",
+       "97   97  0.478537\n",
+       "92   92  0.478539\n",
+       "90   90  0.478567\n",
+       "93   93  0.478580\n",
+       "94   94  0.478582\n",
+       "82   82  0.478602\n",
+       "43   43  0.478631\n",
+       "84   84  0.478672\n",
+       "51   51  0.478745\n",
+       "55   55  0.478871\n",
+       "80   80  0.478913\n",
+       "47   47  0.478996\n",
+       "63   63  0.479010\n",
+       "71   71  0.479052"
+      ]
+     },
+     "execution_count": 77,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "trials_list = []\n",
+    "trials_dict ={'Idx': [], 'Values':[]}\n",
+    "idx = 0\n",
+    "trials = study_lgb.trials\n",
+    "for trial in trials:\n",
+    "    trials_dict['Idx'].append(idx)\n",
+    "    trials_dict['Values'].append(trial.value)\n",
+    "    idx += 1\n",
+    "\n",
+    "df = pd.DataFrame(trials_dict)\n",
+    "df = df.sort_values(by='Values')\n",
+    "df.head(20)\n",
+    "\n",
+    "    \n",
+    "    "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 78,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "p1 = {'max_depth': 9, 'learning_rate': 0.009404180573311752, 'n_estimators': 2999, 'min_child_samples': 65, 'subsample': 0.4520269913445352}\n",
+    "p2 = {'max_depth': 9, 'learning_rate': 0.00992942989740615, 'n_estimators': 2908, 'min_child_samples': 5, 'subsample': 0.48827525974665814}\n",
+    "p3 = {'max_depth': 9, 'learning_rate': 0.009582774850670253, 'n_estimators': 2885, 'min_child_samples': 5, 'subsample': 0.45250657692052937}\n",
+    "p4 = {'max_depth': 9, 'learning_rate': 0.009980262182764717, 'n_estimators': 2511, 'min_child_samples': 8, 'subsample': 0.4138372807562209}\n",
+    "p5 = {'max_depth': 7, 'learning_rate': 0.0097872965636796, 'n_estimators': 2659, 'min_child_samples': 28, 'subsample': 0.4823873153473015}"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 79,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "[LightGBM] [Warning] Accuracy may be bad since you didn't explicitly set num_leaves OR 2^max_depth > num_leaves. (num_leaves=31).\n",
+      "[LightGBM] [Warning] Found whitespace in feature_names, replace with underlines\n",
+      "[LightGBM] [Warning] Accuracy may be bad since you didn't explicitly set num_leaves OR 2^max_depth > num_leaves. (num_leaves=31).\n",
+      "[LightGBM] [Info] Auto-choosing row-wise multi-threading, the overhead of testing was 0.004318 seconds.\n",
+      "You can set `force_row_wise=true` to remove the overhead.\n",
+      "And if memory is not enough, you can set `force_col_wise=true`.\n",
+      "[LightGBM] [Info] Total Bins 1264\n",
+      "[LightGBM] [Info] Number of data points in the train set: 1124347, number of used features: 6\n",
+      "[LightGBM] [Info] Start training from score 10.749419\n",
+      "[LightGBM] [Warning] Accuracy may be bad since you didn't explicitly set num_leaves OR 2^max_depth > num_leaves. (num_leaves=31).\n",
+      "[LightGBM] [Warning] Found whitespace in feature_names, replace with underlines\n",
+      "[LightGBM] [Warning] Accuracy may be bad since you didn't explicitly set num_leaves OR 2^max_depth > num_leaves. (num_leaves=31).\n",
+      "[LightGBM] [Info] Auto-choosing row-wise multi-threading, the overhead of testing was 0.003709 seconds.\n",
+      "You can set `force_row_wise=true` to remove the overhead.\n",
+      "And if memory is not enough, you can set `force_col_wise=true`.\n",
+      "[LightGBM] [Info] Total Bins 1264\n",
+      "[LightGBM] [Info] Number of data points in the train set: 1124347, number of used features: 6\n",
+      "[LightGBM] [Info] Start training from score 10.749419\n",
+      "[LightGBM] [Warning] Accuracy may be bad since you didn't explicitly set num_leaves OR 2^max_depth > num_leaves. (num_leaves=31).\n",
+      "[LightGBM] [Warning] Found whitespace in feature_names, replace with underlines\n",
+      "[LightGBM] [Warning] Accuracy may be bad since you didn't explicitly set num_leaves OR 2^max_depth > num_leaves. (num_leaves=31).\n",
+      "[LightGBM] [Info] Auto-choosing row-wise multi-threading, the overhead of testing was 0.003717 seconds.\n",
+      "You can set `force_row_wise=true` to remove the overhead.\n",
+      "And if memory is not enough, you can set `force_col_wise=true`.\n",
+      "[LightGBM] [Info] Total Bins 1264\n",
+      "[LightGBM] [Info] Number of data points in the train set: 1124347, number of used features: 6\n",
+      "[LightGBM] [Info] Start training from score 10.749419\n",
+      "[LightGBM] [Warning] Accuracy may be bad since you didn't explicitly set num_leaves OR 2^max_depth > num_leaves. (num_leaves=31).\n",
+      "[LightGBM] [Warning] Found whitespace in feature_names, replace with underlines\n",
+      "[LightGBM] [Warning] Accuracy may be bad since you didn't explicitly set num_leaves OR 2^max_depth > num_leaves. (num_leaves=31).\n",
+      "[LightGBM] [Info] Auto-choosing row-wise multi-threading, the overhead of testing was 0.003731 seconds.\n",
+      "You can set `force_row_wise=true` to remove the overhead.\n",
+      "And if memory is not enough, you can set `force_col_wise=true`.\n",
+      "[LightGBM] [Info] Total Bins 1264\n",
+      "[LightGBM] [Info] Number of data points in the train set: 1124347, number of used features: 6\n",
+      "[LightGBM] [Info] Start training from score 10.749419\n",
+      "[LightGBM] [Warning] Accuracy may be bad since you didn't explicitly set num_leaves OR 2^max_depth > num_leaves. (num_leaves=31).\n",
+      "[LightGBM] [Warning] Found whitespace in feature_names, replace with underlines\n",
+      "[LightGBM] [Warning] Accuracy may be bad since you didn't explicitly set num_leaves OR 2^max_depth > num_leaves. (num_leaves=31).\n",
+      "[LightGBM] [Info] Auto-choosing row-wise multi-threading, the overhead of testing was 0.003837 seconds.\n",
+      "You can set `force_row_wise=true` to remove the overhead.\n",
+      "And if memory is not enough, you can set `force_col_wise=true`.\n",
+      "[LightGBM] [Info] Total Bins 1264\n",
+      "[LightGBM] [Info] Number of data points in the train set: 1124347, number of used features: 6\n",
+      "[LightGBM] [Info] Start training from score 10.749419\n",
+      "[LightGBM] [Warning] Accuracy may be bad since you didn't explicitly set num_leaves OR 2^max_depth > num_leaves. (num_leaves=31).\n",
+      "[LightGBM] [Warning] Accuracy may be bad since you didn't explicitly set num_leaves OR 2^max_depth > num_leaves. (num_leaves=31).\n",
+      "[LightGBM] [Warning] Accuracy may be bad since you didn't explicitly set num_leaves OR 2^max_depth > num_leaves. (num_leaves=31).\n",
+      "[LightGBM] [Warning] Accuracy may be bad since you didn't explicitly set num_leaves OR 2^max_depth > num_leaves. (num_leaves=31).\n",
+      "[LightGBM] [Warning] Accuracy may be bad since you didn't explicitly set num_leaves OR 2^max_depth > num_leaves. (num_leaves=31).\n"
+     ]
+    },
+    {
+     "data": {
+      "text/plain": [
+       "array([27802.62138071, 27780.01811508, 27740.10709066, ...,\n",
+       "       27760.05803082, 27760.05803082, 27760.05803082])"
+      ]
+     },
+     "execution_count": 79,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "model = VotingRegressor([\n",
+    "    ('lgb_1', lgb.LGBMRegressor(**p1, random_state=10)),\n",
+    "    ('lgb_2', lgb.LGBMRegressor(**p2, random_state=10)),\n",
+    "    ('lgb_3', lgb.LGBMRegressor(**p3, random_state=10)),\n",
+    "    ('lgb_4', lgb.LGBMRegressor(**p4, random_state=10)),\n",
+    "    ('lgb_5', lgb.LGBMRegressor(**p5, random_state=10))\n",
+    "])\n",
+    "\n",
+    "model.fit(train_X, train_y)\n",
+    "final_pred = model.predict(dt_test)\n",
+    "\n",
+    "pred_sub = np.expm1(final_pred)\n",
+    "pred_sub"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 80,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "pd.DataFrame(pred_sub.astype(int), columns=[\"target\"]).to_csv('sub.csv', index=False)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "base",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.10.13"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 2
+}
