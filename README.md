@@ -1,5 +1,5 @@
 [![Review Assignment Due Date](https://classroom.github.com/assets/deadline-readme-button-24ddc0f5d75046c5622901739e7c5dd533143b0c8e959d652212380cedb1ea36.svg)](https://classroom.github.com/a/g6ZC_OOE)
-# Title (Please modify the title)
+# FastCampus AI Lab ML 프로젝트 - 5조
 
 ## Team
 
@@ -12,8 +12,8 @@
 
 ### Overview
 
-- 아파트 실거래가 예측
-	| 서울시 아파트 실거래가 매매 데이터를 기반으로 아파트 가격을 예측하는 대회
+- AiStages 아파트 실거래가 예측
+	> 서울시 아파트 실거래가 매매 데이터를 기반으로 아파트 가격을 예측하는 대회
 
 ### Timeline
 
