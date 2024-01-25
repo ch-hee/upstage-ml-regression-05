@@ -34,7 +34,7 @@
 	- apartments.csv - 서울시 공동주택 아파트 데이터
 	- coordinates.csv - 위/경도 데이터
 	- subway_counts.csv - 500m 이내 지하철역 개수 데이터 
-	- top_apt_coords.csv - 상위 아파트가 속한 동 및 해당 아파트 위/경도 데이터
+	- top_apt_coords.csv - 상위 아파트가 속한 동 및 대표 아파트 위/경도 데이터
 
 ## 3. Data descrption
 
