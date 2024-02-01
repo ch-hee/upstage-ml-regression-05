@@ -130,7 +130,7 @@
 - Leader Board
 ![LeaderBoard](https://github.com/ch-hee/upstage-ml-regression-05/assets/148758586/3ebf8ea3-b127-49be-bc05-775f1cb828aa)
 
-- Lank 8, 96538.2074
+- Lank 1, 10721.2559
 
 ### Presentation
 
