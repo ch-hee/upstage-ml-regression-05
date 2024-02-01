@@ -128,7 +128,8 @@
 ### Leader Board
 
 - Leader Board
-![LeaderBoard](https://github.com/UpstageAILab/upstage-ml-regression-05/assets/107274920/11c7af8c-b33f-4e6a-a454-c455c23576a8)
+![LeaderBoard](https://github.com/ch-hee/upstage-ml-regression-05/assets/148758586/3ebf8ea3-b127-49be-bc05-775f1cb828aa)
+
 - Lank 8, 96538.2074
 
 ### Presentation
